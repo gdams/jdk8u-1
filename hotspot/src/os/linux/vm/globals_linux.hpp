@@ -49,6 +49,9 @@
   product(bool, UseSHM, false,                                          \
           "Use SYSV shared memory for large pages")                     \
                                                                         \
+  diagnostic(bool, UseCpuAllocPath, false,                              \
+             "Use CPU_ALLOC code path in os::active_processor_count ")  \
+                                                                        \
   product(bool, UseContainerSupport, true,                              \
           "Enable detection and runtime container configuration support") \
                                                                         \

@@ -104,6 +104,14 @@
 
 PRAGMA_FORMAT_MUTE_WARNINGS_FOR_GCC
 
+#ifndef _GNU_SOURCE
+  #define _GNU_SOURCE
+  #include <sched.h>
+  #undef _GNU_SOURCE
+#else
+  #include <sched.h>
+#endif
+
 // if RUSAGE_THREAD for getrusage() has not been defined, do it here. The code calling
 // getrusage() is prepared to handle the associated failure.
 #ifndef RUSAGE_THREAD
@@ -5286,12 +5294,57 @@ void os::make_polling_page_readable(void) {
   }
 };
 
+// Get the current number of available processors for this process.
+// This value can change at any time during a process's lifetime.
+// sched_getaffinity gives an accurate answer as it accounts for cpusets.
+// If it appears there may be more than 1024 processors then we do a
+// dynamic check - see 6515172 for details.
+// If anything goes wrong we fallback to returning the number of online
+// processors - which can be greater than the number available to the process.
 int os::Linux::active_processor_count() {
-  // Linux doesn't yet have a (official) notion of processor sets,
-  // so just return the number of online processors.
-  int online_cpus = ::sysconf(_SC_NPROCESSORS_ONLN);
-  assert(online_cpus > 0 && online_cpus <= processor_count(), "sanity check");
-  return online_cpus;
+  cpu_set_t cpus;  // can represent at most 1024 (CPU_SETSIZE) processors
+  cpu_set_t* cpus_p = &cpus;
+  int cpus_size = sizeof(cpu_set_t);
+
+  int configured_cpus = processor_count();  // upper bound on available cpus
+  int cpu_count = 0;
+
+  // To enable easy testing of the dynamic path on different platforms we
+  // introduce a diagnostic flag: UseCpuAllocPath
+  if (configured_cpus >= CPU_SETSIZE || UseCpuAllocPath) {
+    // kernel may use a mask bigger than cpu_set_t
+    cpus_p = CPU_ALLOC(configured_cpus);
+    if (cpus_p != NULL) {
+      cpus_size = CPU_ALLOC_SIZE(configured_cpus);
+      // zero it just to be safe
+      CPU_ZERO_S(cpus_size, cpus_p);
+    }
+    else {
+       // failed to allocate so fallback to online cpus
+       int online_cpus = ::sysconf(_SC_NPROCESSORS_ONLN);
+       return online_cpus;
+    }
+  }
+
+  // pid 0 means the current thread - which we have to assume represents the process
+  if (sched_getaffinity(0, cpus_size, cpus_p) == 0) {
+    if (cpus_p != &cpus) {
+      cpu_count = CPU_COUNT_S(cpus_size, cpus_p);
+    }
+    else {
+      cpu_count = CPU_COUNT(cpus_p);
+    }
+  }
+  else {
+    cpu_count = ::sysconf(_SC_NPROCESSORS_ONLN);
+  }
+
+  if (cpus_p != &cpus) {
+    CPU_FREE(cpus_p);
+  }
+
+  assert(cpu_count > 0 && cpu_count <= processor_count(), "sanity check");
+  return cpu_count;
 }
 
 // Determine the active processor count from one of
