@@ -28,4 +28,37 @@
 # wrap it and fix the broken property, if needed.
 
 DIR=`dirname $0`
-. $DIR/../../../../config.sub "$@"
+
+# First, filter out everything that doesn't begin with "aarch64-"
+if ! echo $* | grep '^aarch64-' >/dev/null ; then
+    . $DIR/autoconf-config.sub "$@"
+    # autoconf-config.sub exits, so we never reach here, but just in
+    # case we do:
+    exit
+fi
+
+while test $# -gt 0 ; do
+    case $1 in 
+        -- )   # Stop option processing
+            shift; break ;;
+        aarch64-* )
+            config=`echo $1 | sed 's/^aarch64-/arm-/'`
+            sub_args="$sub_args $config"
+            shift; ;;
+        - )    # Use stdin as input.
+            sub_args="$sub_args $1"
+            shift; break ;;
+        * )
+            sub_args="$sub_args $1"
+            shift; ;;
+    esac
+done
+
+result=`. $DIR/autoconf-config.sub $sub_args "$@"`
+exitcode=$?
+
+result=`echo $result | sed "s/^arm-/aarch64-/"`
+
+echo $result
+exit $exitcode
+
